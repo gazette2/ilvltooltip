@@ -1,7 +1,5 @@
 -- ****************************************************************************************************
 -- Refactored by gazette2 - Minimal Tooltip Only Version
--- Removed: Settings UI, Character Pane Overlays, Slash Commands, Legacy Prefixes
--- Kept: GUID Caching, TooltipDataProcessor, Inspect Debounce
 -- ****************************************************************************************************
 
 local addon = ...;
