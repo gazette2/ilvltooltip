@@ -1,5 +1,7 @@
 -- ****************************************************************************************************
 -- Refactored by gazette2 - Minimal Tooltip Only Version
+-- Removed: Settings UI, Character Pane Overlays, Slash Commands, Legacy Prefixes
+-- Kept: GUID Caching, TooltipDataProcessor, Inspect Debounce
 -- ****************************************************************************************************
 
 local addon = ...;
@@ -156,14 +158,11 @@ end
 -- ============================================================================
 TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tooltip, data)
     if tooltip ~= GameTooltip then return end
+    if not data or not data.guid then return end
 
-    local name, unit = tooltip:GetUnit();
-    if not unit or not UnitIsPlayer(unit) then return end 
-
-    local guid = UnitGUID(unit);
-    if not guid then return end
-
+    local guid = data.guid;
     local cached = playerCache[guid];
+    
     if cached and cached.iLvl and cached.iLvl > 0 then
         tooltip:AddLine(" "); -- Add a blank line for readability
 
