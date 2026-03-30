@@ -13,6 +13,18 @@ local lastInspectTime = 0;
 local INSPECT_DEBOUNCE = 0.5; -- Prevent server throttling
 local pendingInspect = nil;
 
+-- Helper to safely check if a GUID is not a "secret" string
+local function IsSafeGUID(guid)
+    if not guid or type(guid) ~= "string" then return false end
+    -- Acts similar to a Try-Catch block.
+    -- Safely swallows the exception caused by using a tainted Secret object as a key and returns false.
+    local success = pcall(function()
+        local testTable = {}
+        testTable[guid] = true
+    end)
+    return success
+end
+
 -- Create event handler frame
 local eventFrame = CreateFrame("frame");
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
@@ -35,7 +47,7 @@ function HandleMouseover()
     if not CanInspect("mouseover") then return end
 
     local guid = UnitGUID("mouseover");
-    if not guid then return end
+    if not IsSafeGUID(guid) then return end
 
     local now = GetTime();
     -- Check if we have valid cache
@@ -57,9 +69,17 @@ end
 
 -- Resolving specific unit by GUID for robust parsing
 local function GetUnitByGUID(guid)
-    if UnitGUID("mouseover") == guid then return "mouseover" end
-    if UnitGUID("target") == guid then return "target" end
-    if UnitGUID("focus") == guid then return "focus" end
+    -- Utilizes Lua's short-circuit evaluation.
+    -- If IsSafeGUID is false, the subsequent (==) comparison is not executed, preventing exceptions.
+    local moGuid = UnitGUID("mouseover");
+    if IsSafeGUID(moGuid) and moGuid == guid then return "mouseover" end
+
+    local tGuid = UnitGUID("target");
+    if IsSafeGUID(tGuid) and tGuid == guid then return "target" end
+
+    local fGuid = UnitGUID("focus");
+    if IsSafeGUID(fGuid) and fGuid == guid then return "focus" end
+
     return nil;
 end
 
@@ -74,6 +94,8 @@ local function RefreshTooltipIfMatching(guid)
 end
 
 function HandleInspectReady(guid)
+    if not IsSafeGUID(guid) then return end
+
     if pendingInspect == guid then
         pendingInspect = nil;
     end
@@ -161,6 +183,10 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tool
     if not data or not data.guid then return end
 
     local guid = data.guid;
+    
+    -- Sandbox check to prevent "table index is secret" runtime errors
+    if not IsSafeGUID(guid) then return end 
+
     local cached = playerCache[guid];
     
     if cached and cached.iLvl and cached.iLvl > 0 then
