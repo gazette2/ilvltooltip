@@ -29,12 +29,20 @@ end
 local eventFrame = CreateFrame("frame");
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
 eventFrame:RegisterEvent("INSPECT_READY");
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED"); -- Fires when entering combat
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED");  -- Fires when leaving combat
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if (event == "UPDATE_MOUSEOVER_UNIT") then
         HandleMouseover();
     elseif (event == "INSPECT_READY") then
         HandleInspectReady(...);
+    elseif (event == "PLAYER_REGEN_DISABLED") then
+        -- Unsubscribe from mouseover events to save CPU cycles during combat
+        self:UnregisterEvent("UPDATE_MOUSEOVER_UNIT");
+    elseif (event == "PLAYER_REGEN_ENABLED") then
+        -- Resubscribe when combat ends
+        self:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
     end
 end);
 
@@ -42,7 +50,7 @@ end);
 -- Core Inspect Logic (Debounced & Cached)
 -- ============================================================================
 function HandleMouseover()
-    if InCombatLockdown() then return end -- Do not fire inspects in combat
+    -- InCombatLockdown check is no longer needed here as the event itself is unregistered
     if not UnitIsPlayer("mouseover") then return end 
     if not CanInspect("mouseover") then return end
 
