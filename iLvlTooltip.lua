@@ -10,7 +10,7 @@ local addon = ...;
 local playerCache = {};
 local CACHE_TTL = 300; -- Cache Time To Live: 300 seconds (5 minutes)
 local lastInspectTime = 0;
-local INSPECT_DEBOUNCE = 0.5; -- Prevent server throttling
+local INSPECT_DEBOUNCE = 0.3; -- Prevent server throttling
 local pendingInspect = nil;
 
 -- Helper to safely check if a GUID is not a "secret" string
@@ -94,9 +94,22 @@ local function GetUnitByGUID(guid)
         return (ok2 and isMatch)
     end
 
+    -- 1순위: 마우스 오버, 타겟, 포커스, 본인 검사
     if checkUnitMatch("mouseover") then return "mouseover" end
     if checkUnitMatch("target") then return "target" end
     if checkUnitMatch("focus") then return "focus" end
+    if checkUnitMatch("player") then return "player" end
+
+    -- 2순위: 위에서 대상을 놓쳤고 공격대/파티에 속해 있다면 그룹 프레임에서 대상을 탐색
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            if checkUnitMatch("raid"..i) then return "raid"..i end
+        end
+    elseif IsInGroup() then
+        for i = 1, GetNumSubgroupMembers() do
+            if checkUnitMatch("party"..i) then return "party"..i end
+        end
+    end
 
     return nil
 end
