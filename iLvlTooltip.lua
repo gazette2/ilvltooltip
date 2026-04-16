@@ -15,14 +15,15 @@ local pendingInspect = nil;
 
 -- Helper to safely check if a GUID is not a "secret" string
 local function IsSafeGUID(guid)
-    if not guid or type(guid) ~= "string" then return false end
-    -- Acts similar to a Try-Catch block.
-    -- Safely swallows the exception caused by using a tainted Secret object as a key and returns false.
-    local success = pcall(function()
-        local testTable = {}
-        testTable[guid] = true
+    if type(guid) ~= "string" then return false end
+    
+    -- "Player-" 로 시작하는 정상적인 GUID 포맷을 가지고 있는지 확인.
+    -- Secret String은 보통 string API(sub, match)를 통과하지 못해 에러를 던지거나 매칭되지 않습니다.
+    local success, isPlayer = pcall(function()
+        return string.sub(guid, 1, 7) == "Player-"
     end)
-    return success
+
+    return success and isPlayer
 end
 
 -- Create event handler frame
@@ -77,26 +78,44 @@ end
 
 -- Resolving specific unit by GUID for robust parsing
 local function GetUnitByGUID(guid)
-    -- Utilizes Lua's short-circuit evaluation.
-    -- If IsSafeGUID is false, the subsequent (==) comparison is not executed, preventing exceptions.
-    local moGuid = UnitGUID("mouseover");
-    if IsSafeGUID(moGuid) and moGuid == guid then return "mouseover" end
+    if type(guid) ~= "string" then return nil end
 
-    local tGuid = UnitGUID("target");
-    if IsSafeGUID(tGuid) and tGuid == guid then return "target" end
+    local function checkUnitMatch(unit)
+        local uGuid
+        -- UnitGUID 호출 자체도 pcall로 보호합니다
+        local ok1 = pcall(function() uGuid = UnitGUID(unit) end)
+        if not ok1 or not uGuid then return false end
 
-    local fGuid = UnitGUID("focus");
-    if IsSafeGUID(fGuid) and fGuid == guid then return "focus" end
+        -- 두 값을 비교하는 연산 자체(==)를 pcall 내부에서 처리합니다
+        local ok2, isMatch = pcall(function()
+            return uGuid == guid
+        end)
+        
+        return (ok2 and isMatch)
+    end
 
-    return nil;
+    if checkUnitMatch("mouseover") then return "mouseover" end
+    if checkUnitMatch("target") then return "target" end
+    if checkUnitMatch("focus") then return "focus" end
+
+    return nil
 end
 
 -- Helper to force tooltip redraw when async data arrives
 local function RefreshTooltipIfMatching(guid)
     if GameTooltip:IsVisible() then
-        local _, unit = GameTooltip:GetUnit();
-        if unit and UnitGUID(unit) == guid then
-            GameTooltip:SetUnit(unit); -- Forces TooltipDataProcessor to run again
+        local ok, unit = pcall(function()
+            local _, u = GameTooltip:GetUnit()
+            return u
+        end)
+
+        if ok and unit then
+            -- UnitGUID 및 비교 로직을 안전망(pcall) 내부에서 실행
+            pcall(function()
+                if UnitGUID(unit) == guid then
+                    GameTooltip:SetUnit(unit) -- Forces TooltipDataProcessor to run again
+                end
+            end)
         end
     end
 end
@@ -190,24 +209,28 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tool
     if tooltip ~= GameTooltip then return end
     if not data or not data.guid then return end
 
-    local guid = data.guid;
-    
-    -- Sandbox check to prevent "table index is secret" runtime errors
-    if not IsSafeGUID(guid) then return end 
+    local guid = data.guid
+    if type(guid) ~= "string" then return end
 
-    local cached = playerCache[guid];
-    
-    if cached and cached.iLvl and cached.iLvl > 0 then
-        tooltip:AddLine(" "); -- Add a blank line for readability
+    -- 테이블 인덱싱 접근 자체를 pcall 내부에서 실행
+    local ok, cached = pcall(function()
+        return playerCache[guid]
+    end)
 
-        local wepText = "";
+    -- ok가 false라는 것은 guid가 secret 값이라 table 인덱싱이 막혔다는 뜻입니다
+    if not ok or not cached then return end
+    
+    if cached.iLvl and cached.iLvl > 0 then
+        tooltip:AddLine(" ") -- Add a blank line for readability
+
+        local wepText = ""
         if cached.weapiLvl and cached.weapiLvl ~= "" then
-            wepText = cached.weapiLvl;
+            wepText = cached.weapiLvl
         end
-        tooltip:AddLine("iLvl: " .. cached.iLvl .. wepText);
+        tooltip:AddLine("iLvl: " .. cached.iLvl .. wepText)
 
         if cached.mPlusRating ~= "0" then
-            tooltip:AddLine("M+ Score: " .. cached.mPlusRating);
+            tooltip:AddLine("M+ Score: " .. cached.mPlusRating)
         end
     end
 end);
