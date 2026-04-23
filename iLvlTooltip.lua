@@ -14,13 +14,13 @@ local INSPECT_DEBOUNCE = 0.2; -- Prevent server throttling (Lowered to 0.2s for 
 local pendingInspect = nil;
 
 -- ============================================================================
--- Secret Value Detection (비교 연산자 완벽 배제 버전)
+-- Secret Value Detection (Comparison Operator Exclusion)
 -- ============================================================================
 local function IsSafeString(str)
     if type(str) ~= "string" then return false end
     
-    -- 비밀 문자열을 식별하기 위해, [] 연산자 대신 C 내장 함수인 rawset을 사용합니다.
-    -- rawset은 UI 에러 로그를 강제로 남기지 않으므로 pcall을 통해 조용히 걸러낼 수 있습니다.
+    -- To identify restricted strings without triggering UI errors,
+    -- use the C built-in function rawset with pcall instead of the [] operator.
     local dummyTable = {}
     local ok = pcall(rawset, dummyTable, str, true)
     return ok
@@ -29,10 +29,11 @@ end
 local function IsSafeGUID(guid)
     if not IsSafeString(guid) then return false end
     
-    -- == 연산자를 절대 쓰면 안되므로, string.match를 통해 패턴 일치 여부만 확인합니다.
+    -- Using the == operator on restricted values can cause issues.
+    -- We verify pattern matches via string.match instead.
     local ok, matchPattern = pcall(string.match, guid, "^Player%-")
     
-    -- matchPattern이 존재(truthy)하면 true, 아니면 false 반환 (==, ~= 금지)
+    -- Return true if matchPattern is truthy, false otherwise (==, ~= must be avoided)
     return ok and (matchPattern and true or false)
 end
 
@@ -83,12 +84,12 @@ end
 
 -- Resolving specific unit by GUID for robust parsing
 local function GetUnitByGUID(safeGuid)
-    -- 들어온 값이 안전한지 확인
+    -- Verify the input value is safe
     if not IsSafeGUID(safeGuid) then return nil end
 
     local function checkUnitMatch(unit)
         local ok, uGuid = pcall(function() return UnitGUID(unit) end)
-        -- 반환된 uGuid 역시 비교(==)하기 전에 비밀 값인지 반드시 점검해야 함
+        -- Must ensure the returned uGuid is safe before using equality (==) comparisons
         if not ok or not IsSafeGUID(uGuid) then return false end
         return uGuid == safeGuid
     end
@@ -118,7 +119,7 @@ local function RefreshTooltipIfMatching(safeGuid)
             return u
         end)
 
-        -- 툴팁에서 가져온 unit 값 자체도 secret일 수 있으므로 UnitGUID()에 넣기 전에 안전한 문자열인지 확인
+        -- The unit value from the tooltip might be a secret, so check if it's safe before passing to UnitGUID()
         if ok and IsSafeString(unit) then
             local ok2, uGuid = pcall(function() return UnitGUID(unit) end)
             if ok2 and IsSafeGUID(uGuid) and uGuid == safeGuid then
@@ -178,7 +179,7 @@ function HandleInspectReady(guid)
                 wStr = wStr ~= "" and (wStr .. "/" .. tostring(weaps.oh)) or tostring(weaps.oh) 
             end
             if wStr ~= "" then
-                -- guid는 위에서 안전성이 보장되었으므로 업데이트 (인덱싱 가능)
+                -- guid is guaranteed safe above, so it can be used for indexing and updating
                 if playerCache[guid] then
                     playerCache[guid].weapiLvl = " (" .. wStr .. ")";
                     RefreshTooltipIfMatching(guid);
@@ -217,8 +218,8 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tool
 
     local guid = data.guid
     
-    -- ★ 이 부분이 가장 많이 에러가 났던(2876번) 지점입니다. 
-    -- 인덱스로 쓰기 전 철저하게 Secret이 아님을 증명하고 넘어가야 합니다.
+    -- ★ This is the point where the most errors occurred (2876 times).
+    -- It must be strictly proven that it is not a Secret before being used as an index.
     if not IsSafeGUID(guid) then return end 
 
     local cached = playerCache[guid]
