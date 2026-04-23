@@ -10,28 +10,40 @@ local addon = ...;
 local playerCache = {};
 local CACHE_TTL = 300; -- Cache Time To Live: 300 seconds (5 minutes)
 local lastInspectTime = 0;
-local INSPECT_DEBOUNCE = 0.3; -- Prevent server throttling
+local INSPECT_DEBOUNCE = 0.2; -- Prevent server throttling (Lowered to 0.2s for better group responsiveness)
 local pendingInspect = nil;
 
--- Helper to safely check if a GUID is not a "secret" string
-local function IsSafeGUID(guid)
-    if type(guid) ~= "string" then return false end
+-- ============================================================================
+-- Secret Value Detection (비교 연산자 완벽 배제 버전)
+-- ============================================================================
+local function IsSafeString(str)
+    if type(str) ~= "string" then return false end
     
-    -- "Player-" 로 시작하는 정상적인 GUID 포맷을 가지고 있는지 확인.
-    -- Secret String은 보통 string API(sub, match)를 통과하지 못해 에러를 던지거나 매칭되지 않습니다.
-    local success, isPlayer = pcall(function()
-        return string.sub(guid, 1, 7) == "Player-"
-    end)
-
-    return success and isPlayer
+    -- 비밀 문자열을 식별하기 위해, [] 연산자 대신 C 내장 함수인 rawset을 사용합니다.
+    -- rawset은 UI 에러 로그를 강제로 남기지 않으므로 pcall을 통해 조용히 걸러낼 수 있습니다.
+    local dummyTable = {}
+    local ok = pcall(rawset, dummyTable, str, true)
+    return ok
 end
 
--- Create event handler frame
+local function IsSafeGUID(guid)
+    if not IsSafeString(guid) then return false end
+    
+    -- == 연산자를 절대 쓰면 안되므로, string.match를 통해 패턴 일치 여부만 확인합니다.
+    local ok, matchPattern = pcall(string.match, guid, "^Player%-")
+    
+    -- matchPattern이 존재(truthy)하면 true, 아니면 false 반환 (==, ~= 금지)
+    return ok and (matchPattern and true or false)
+end
+
+-- ============================================================================
+-- Events
+-- ============================================================================
 local eventFrame = CreateFrame("frame");
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
 eventFrame:RegisterEvent("INSPECT_READY");
-eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED"); -- Fires when entering combat
-eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED");  -- Fires when leaving combat
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED");
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED");
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if (event == "UPDATE_MOUSEOVER_UNIT") then
@@ -39,36 +51,29 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif (event == "INSPECT_READY") then
         HandleInspectReady(...);
     elseif (event == "PLAYER_REGEN_DISABLED") then
-        -- Unsubscribe from mouseover events to save CPU cycles during combat
         self:UnregisterEvent("UPDATE_MOUSEOVER_UNIT");
     elseif (event == "PLAYER_REGEN_ENABLED") then
-        -- Resubscribe when combat ends
         self:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
     end
 end);
 
 -- ============================================================================
--- Core Inspect Logic (Debounced & Cached)
+-- Core Inspect Logic
 -- ============================================================================
 function HandleMouseover()
-    -- InCombatLockdown check is no longer needed here as the event itself is unregistered
     if not UnitIsPlayer("mouseover") then return end 
     if not CanInspect("mouseover") then return end
 
-    local guid = UnitGUID("mouseover");
-    if not IsSafeGUID(guid) then return end
+    local ok, guid = pcall(function() return UnitGUID("mouseover") end)
+    if not ok or not IsSafeGUID(guid) then return end
 
     local now = GetTime();
-    -- Check if we have valid cache
     if playerCache[guid] and (now - playerCache[guid].timestamp < CACHE_TTL) then
-        return; -- Valid cache exists, no need to inspect
+        return;
     end
 
-    if pendingInspect == guid then
-        return; -- Already waiting for this specific character's data
-    end
+    if pendingInspect == guid then return; end
 
-    -- Debounce logic
     if (now - lastInspectTime) > INSPECT_DEBOUNCE then
         lastInspectTime = now;
         pendingInspect = guid;
@@ -77,30 +82,22 @@ function HandleMouseover()
 end
 
 -- Resolving specific unit by GUID for robust parsing
-local function GetUnitByGUID(guid)
-    if type(guid) ~= "string" then return nil end
+local function GetUnitByGUID(safeGuid)
+    -- 들어온 값이 안전한지 확인
+    if not IsSafeGUID(safeGuid) then return nil end
 
     local function checkUnitMatch(unit)
-        local uGuid
-        -- UnitGUID 호출 자체도 pcall로 보호합니다
-        local ok1 = pcall(function() uGuid = UnitGUID(unit) end)
-        if not ok1 or not uGuid then return false end
-
-        -- 두 값을 비교하는 연산 자체(==)를 pcall 내부에서 처리합니다
-        local ok2, isMatch = pcall(function()
-            return uGuid == guid
-        end)
-        
-        return (ok2 and isMatch)
+        local ok, uGuid = pcall(function() return UnitGUID(unit) end)
+        -- 반환된 uGuid 역시 비교(==)하기 전에 비밀 값인지 반드시 점검해야 함
+        if not ok or not IsSafeGUID(uGuid) then return false end
+        return uGuid == safeGuid
     end
 
-    -- 1순위: 마우스 오버, 타겟, 포커스, 본인 검사
     if checkUnitMatch("mouseover") then return "mouseover" end
     if checkUnitMatch("target") then return "target" end
     if checkUnitMatch("focus") then return "focus" end
     if checkUnitMatch("player") then return "player" end
 
-    -- 2순위: 위에서 대상을 놓쳤고 공격대/파티에 속해 있다면 그룹 프레임에서 대상을 탐색
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
             if checkUnitMatch("raid"..i) then return "raid"..i end
@@ -114,21 +111,19 @@ local function GetUnitByGUID(guid)
     return nil
 end
 
--- Helper to force tooltip redraw when async data arrives
-local function RefreshTooltipIfMatching(guid)
+local function RefreshTooltipIfMatching(safeGuid)
     if GameTooltip:IsVisible() then
         local ok, unit = pcall(function()
             local _, u = GameTooltip:GetUnit()
             return u
         end)
 
-        if ok and unit then
-            -- UnitGUID 및 비교 로직을 안전망(pcall) 내부에서 실행
-            pcall(function()
-                if UnitGUID(unit) == guid then
-                    GameTooltip:SetUnit(unit) -- Forces TooltipDataProcessor to run again
-                end
-            end)
+        -- 툴팁에서 가져온 unit 값 자체도 secret일 수 있으므로 UnitGUID()에 넣기 전에 안전한 문자열인지 확인
+        if ok and IsSafeString(unit) then
+            local ok2, uGuid = pcall(function() return UnitGUID(unit) end)
+            if ok2 and IsSafeGUID(uGuid) and uGuid == safeGuid then
+                GameTooltip:SetUnit(unit)
+            end
         end
     end
 end
@@ -152,25 +147,22 @@ function HandleInspectReady(guid)
         return; 
     end
 
-    -- Exception handling for Mythic+
     local mPlusRating = "0";
     local mPlusData = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(unit);
     if mPlusData and mPlusData.currentSeasonScore then
         mPlusRating = tostring(mPlusData.currentSeasonScore);
     end
 
-    -- Create/Update Cache
     playerCache[guid] = {
         timestamp = GetTime(),
         iLvl = iLvl,
         mPlusRating = mPlusRating,
-        weapiLvl = "" -- Will be updated asynchronously
+        weapiLvl = ""
     };
 
-    ClearInspectPlayer(); -- Release the server inspect lock
+    ClearInspectPlayer();
     RefreshTooltipIfMatching(guid);
 
-    -- Async Weapon parsing
     local mhLink = GetInventoryItemLink(unit, GetInventorySlotInfo("MainHandSlot"));
     local ohLink = GetInventoryItemLink(unit, GetInventorySlotInfo("SecondaryHandSlot"));
     
@@ -186,6 +178,7 @@ function HandleInspectReady(guid)
                 wStr = wStr ~= "" and (wStr .. "/" .. tostring(weaps.oh)) or tostring(weaps.oh) 
             end
             if wStr ~= "" then
+                -- guid는 위에서 안전성이 보장되었으므로 업데이트 (인덱싱 가능)
                 if playerCache[guid] then
                     playerCache[guid].weapiLvl = " (" .. wStr .. ")";
                     RefreshTooltipIfMatching(guid);
@@ -216,25 +209,22 @@ function HandleInspectReady(guid)
 end
 
 -- ============================================================================
--- Modern Tooltip Handling (WoW 10.0+ TooltipDataProcessor)
+-- Modern Tooltip Handling
 -- ============================================================================
 TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tooltip, data)
     if tooltip ~= GameTooltip then return end
     if not data or not data.guid then return end
 
     local guid = data.guid
-    if type(guid) ~= "string" then return end
-
-    -- 테이블 인덱싱 접근 자체를 pcall 내부에서 실행
-    local ok, cached = pcall(function()
-        return playerCache[guid]
-    end)
-
-    -- ok가 false라는 것은 guid가 secret 값이라 table 인덱싱이 막혔다는 뜻입니다
-    if not ok or not cached then return end
     
-    if cached.iLvl and cached.iLvl > 0 then
-        tooltip:AddLine(" ") -- Add a blank line for readability
+    -- ★ 이 부분이 가장 많이 에러가 났던(2876번) 지점입니다. 
+    -- 인덱스로 쓰기 전 철저하게 Secret이 아님을 증명하고 넘어가야 합니다.
+    if not IsSafeGUID(guid) then return end 
+
+    local cached = playerCache[guid]
+    
+    if cached and cached.iLvl and cached.iLvl > 0 then
+        tooltip:AddLine(" ")
 
         local wepText = ""
         if cached.weapiLvl and cached.weapiLvl ~= "" then
