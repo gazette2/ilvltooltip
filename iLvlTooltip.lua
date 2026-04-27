@@ -51,10 +51,10 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         HandleMouseover();
     elseif (event == "INSPECT_READY") then
         HandleInspectReady(...);
-    elseif (event == "PLAYER_REGEN_DISABLED") then
-        self:UnregisterEvent("UPDATE_MOUSEOVER_UNIT");
-    elseif (event == "PLAYER_REGEN_ENABLED") then
-        self:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
+    -- elseif (event == "PLAYER_REGEN_DISABLED") then
+    --    self:UnregisterEvent("UPDATE_MOUSEOVER_UNIT");
+    -- elseif (event == "PLAYER_REGEN_ENABLED") then
+    --    self:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
     end
 end);
 
