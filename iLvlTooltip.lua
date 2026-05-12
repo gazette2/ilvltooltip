@@ -62,6 +62,9 @@ end);
 -- Core Inspect Logic
 -- ============================================================================
 function HandleMouseover()
+    -- 기본 살펴보기 창이 열려있을 경우 충돌을 방지하기 위해 중단
+    if InspectFrame and InspectFrame:IsShown() then return end
+
     if not UnitIsPlayer("mouseover") then return end 
     if not CanInspect("mouseover") then return end
 
@@ -137,14 +140,14 @@ function HandleInspectReady(guid)
     end
 
     local unit = GetUnitByGUID(guid);
+    -- 데이터를 찾지 못해도 ClearInspectPlayer()를 호출하지 않고 그냥 중단합니다.
     if not unit then 
-        ClearInspectPlayer();
         return; 
     end
 
     local iLvl = C_PaperDollInfo.GetInspectItemLevel(unit);
+    -- 템렙을 아직 못 불러왔어도 데이터를 날리지 않고 그냥 중단합니다.
     if not iLvl or iLvl <= 0 then 
-        ClearInspectPlayer();
         return; 
     end
 
@@ -161,7 +164,7 @@ function HandleInspectReady(guid)
         weapiLvl = ""
     };
 
-    ClearInspectPlayer();
+    -- 데이터 캐싱 후에도 ClearInspectPlayer()를 호출하지 않습니다.
     RefreshTooltipIfMatching(guid);
 
     local mhLink = GetInventoryItemLink(unit, GetInventorySlotInfo("MainHandSlot"));
@@ -179,7 +182,6 @@ function HandleInspectReady(guid)
                 wStr = wStr ~= "" and (wStr .. "/" .. tostring(weaps.oh)) or tostring(weaps.oh) 
             end
             if wStr ~= "" then
-                -- guid is guaranteed safe above, so it can be used for indexing and updating
                 if playerCache[guid] then
                     playerCache[guid].weapiLvl = " (" .. wStr .. ")";
                     RefreshTooltipIfMatching(guid);
@@ -238,3 +240,4 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tool
         end
     end
 end);
+
